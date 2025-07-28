@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+.pytest_cache/
+.coverage
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Тестовые данные и результаты
+test_results/
+test_files_old/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Проект
+.env
+.env.*
+temp/
+data/
+logs/
+
+# Git
+.git/
+.gitignore
+
+# Документация для разработчиков
+CLAUDE.md
+README_EN.md
+test_scripts/
+
+# Временные файлы
+*.tmp
+*.bak
+*.cache
+
+# НЕ игнорируем модели Marker
+!marker_models/

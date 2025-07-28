@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  any-to-md:
+    build: .
+    image: any-to-md:latest
+    container_name: any-to-md-service
+    ports:
+      - "8080:8000"
+    environment:
+      # Основные настройки
+      - HOST=0.0.0.0
+      - PORT=8000
+      - MAX_FILE_SIZE_MB=50
+      - CLEANUP_INTERVAL_HOURS=24
+      - CLEANUP_AGE_DAYS=7
+      # S3 настройки из .env файла
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_STORAGE_BUCKET_NAME=${AWS_STORAGE_BUCKET_NAME}
+      - AWS_S3_REGION_NAME=${AWS_S3_REGION_NAME}
+      - AWS_S3_ENDPOINT_URL=${AWS_S3_ENDPOINT_URL}
+      
+    volumes:
+      # Монтируем директории для сохранения данных между перезапусками
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+      - ./data:/app/data
+      
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

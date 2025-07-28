@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project specific
+temp/
+tasks.db
+*.log
+logs/
+data/
+
+# Environment
+.env
+.env.backup
+.env.local
+.env.production
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+/marker_models/
+/test_results/
