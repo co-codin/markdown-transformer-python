@@ -1,0 +1,2 @@
+marker_models/**/*.safetensors filter=lfs diff=lfs merge=lfs -text
+marker_models/**/*.bin filter=lfs diff=lfs merge=lfs -text
