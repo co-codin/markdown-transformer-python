@@ -2,6 +2,9 @@ version: '3.8'
 
 services:
   any-to-md:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: any-to-md:latest
     container_name: any-to-md
     ports:
