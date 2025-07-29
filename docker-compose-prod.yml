@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  any-to-md:
+    image: any-to-md:latest
+    container_name: any-to-md
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      # Основные настройки
+      - HOST=0.0.0.0
+      - PORT=8000
+      - MAX_FILE_SIZE_MB=50
+      - CLEANUP_INTERVAL_HOURS=24
+      - CLEANUP_AGE_DAYS=7
+      
+      # S3 настройки (опционально)
+      # Передаем переменные из .env файла
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_STORAGE_BUCKET_NAME=${AWS_STORAGE_BUCKET_NAME}
+      - AWS_S3_REGION_NAME=${AWS_S3_REGION_NAME}
+      - AWS_S3_ENDPOINT_URL=${AWS_S3_ENDPOINT_URL}
+      - S3_FOLDER_PREFIX=${S3_FOLDER_PREFIX}
+      
+    volumes:
+      # Монтируем директории для сохранения данных между перезапусками
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+      - ./app/tasks.db:/app/app/tasks.db
+      
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Ограничения ресурсов (опционально)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 4G
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 2G
+
+# Пример с S3 конфигурацией
+# services:
+#   any-to-md-s3:
+#     image: any-to-md:latest
+#     container_name: any-to-md-s3
+#     ports:
+#       - "8001:8000"
+#     env_file:
+#       - .env  # Загружаем S3 credentials из файла
+#     volumes:
+#       - ./temp:/app/temp
+#       - ./logs:/app/logs
+#     restart: unless-stopped
