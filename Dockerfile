@@ -47,9 +47,6 @@ RUN mkdir -p temp/uploads temp/results logs data
 # Это позволит избежать повторного скачивания при сборке Docker
 COPY --chown=root:root marker_models /root/.cache/datalab/models
 
-# Проверяем наличие моделей и докачиваем только если их нет
-RUN python -c "from marker.models import create_model_dict; create_model_dict()" || true
-
 # Expose port
 EXPOSE 8000
 
