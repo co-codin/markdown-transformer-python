@@ -8,7 +8,7 @@ services:
     image: any-to-md:latest
     container_name: any-to-md
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:8000"
     environment:
       # Основные настройки
       - HOST=0.0.0.0
