@@ -14,6 +14,7 @@ Deploy-develop :
    - echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config 
    - eval USER_HOST=\$SSH_USER_HOST && ssh ${USER_HOST}  "cd /var/www/any-to-md-service && git status && ls -lha"
    - eval USER_HOST=\$SSH_USER_HOST && ssh ${USER_HOST}  "cd /var/www/any-to-md-service && git pull && git switch develop"
+   - eval USER_HOST=\$SSH_USER_HOST && ssh ${USER_HOST}  "cd /var/www/any-to-md-service && git lfs pull"
    - eval USER_HOST=\$SSH_USER_HOST && ssh ${USER_HOST}  "cd /var/www/any-to-md-service && docker compose build"
    - eval USER_HOST=\$SSH_USER_HOST && ssh ${USER_HOST}  "cd /var/www/any-to-md-service && docker compose up -d"
    - eval USER_HOST=\$SSH_USER_HOST && ssh ${USER_HOST}  "cd /var/www/any-to-md-service && docker images -f 'dangling=true' -q | xargs --no-run-if-empty docker rmi" 
@@ -37,6 +38,7 @@ Deploy-prod :
    - echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config 
    - eval USER_HOST=\$SSH_USER_HOST_SERVICES_PROD && ssh ${USER_HOST}  "cd /home/services/any-to-md-service && git status && ls -lha"
    - eval USER_HOST=\$SSH_USER_HOST_SERVICES_PROD && ssh ${USER_HOST}  "cd /home/services/any-to-md-service && git pull && git switch main"
+   - eval USER_HOST=\$SSH_USER_HOST_SERVICES_PROD && ssh ${USER_HOST}  "cd /home/services/any-to-md-service && git lfs pull"
    - eval USER_HOST=\$SSH_USER_HOST_SERVICES_PROD && ssh ${USER_HOST}  "cd /home/services/any-to-md-service && docker compose -f docker-compose-prod.yml build"
    - eval USER_HOST=\$SSH_USER_HOST_SERVICES_PROD && ssh ${USER_HOST}  "cd /home/services/any-to-md-service && docker compose -f docker-compose-prod.yml up -d"
    - eval USER_HOST=\$SSH_USER_HOST_SERVICES_PROD && ssh ${USER_HOST}  "cd /home/services/any-to-md-service && docker images -f 'dangling=true' -q | xargs --no-run-if-empty docker rmi" 
