@@ -9,88 +9,63 @@ from typing import Optional, Tuple
 logger = logging.getLogger(__name__)
 
 from app.config.s3_config import get_s3_config, is_s3_enabled
-try:
-    from app.converters.simple_s3_uploader import create_s3_markdown
-except ImportError as e:
-    logger.error(f"Failed to import create_s3_markdown: {e}")
-    create_s3_markdown = None
+# try:
+#     from app.converters.simple_s3_uploader import create_s3_markdown
+# except ImportError as e:
+#     logger.error(f"Failed to import create_s3_markdown: {e}")
+#     create_s3_markdown = None
 
 
 def process_result_with_s3(
     task_id: str,
     markdown_path: str,
-    images_dir: Optional[str]
+    images_dir: Optional[str],
+    result_zip_path: str,
+    original_filename: str
 ) -> Tuple[str, int]:
     """
-    Обрабатывает результат конвертации, загружая изображения в S3.
+    Обрабатывает результат конвертации, загружая ZIP архив в S3.
     
     Args:
         task_id: ID задачи
         markdown_path: Путь к Markdown файлу
         images_dir: Директория с изображениями (может быть None)
+        result_zip_path: Путь к ZIP архиву с результатами
+        original_filename: Оригинальное имя файла
         
     Returns:
-        (путь к финальному markdown, количество загруженных изображений)
+        (S3 URL загруженного файла или None, 0 - для совместимости)
     """
-    # Если S3 не включен или нет изображений - возвращаем как есть
+    # Если S3 не включен - возвращаем None
     if not is_s3_enabled():
         logger.info(f"S3 is not enabled for task {task_id}")
-        return markdown_path, 0
+        return None, 0
         
-    if not images_dir or not os.path.exists(images_dir):
-        logger.info(f"No images directory for task {task_id}")
-        return markdown_path, 0
+    # Проверяем что ZIP файл существует
+    if not result_zip_path or not os.path.exists(result_zip_path):
+        logger.error(f"ZIP file not found for task {task_id}: {result_zip_path}")
+        return None, 0
         
-    # Проверяем есть ли изображения
-    image_count = 0
-    for root, dirs, files in os.walk(images_dir):
-        for file in files:
-            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg')):
-                image_count += 1
-                
-    if image_count == 0:
-        logger.info(f"No images found for task {task_id}, skipping S3 upload")
-        return markdown_path, 0
-        
-    logger.info(f"Processing {image_count} images for S3 upload (task {task_id})")
+    logger.info(f"Uploading ZIP to S3 for task {task_id}")
     
     try:
-        # Получаем конфигурацию S3
-        s3_config = get_s3_config()
-        if not s3_config:
-            logger.warning("S3 config not found, skipping upload")
-            return markdown_path, 0
-            
-        # Убираем флаг enabled из конфига для uploader
-        config_for_uploader = {k: v for k, v in s3_config.items() if k != 'enabled'}
+        # Импортируем функцию загрузки из s3_uploader
+        from app.services.s3_uploader import upload_result_to_s3
         
-        # Проверяем что функция импортирована
-        if create_s3_markdown is None:
-            logger.error("create_s3_markdown function not available")
-            return markdown_path, 0
-            
-        # Создаем Markdown с S3 ссылками
-        s3_markdown_path = create_s3_markdown(
-            markdown_path, 
-            images_dir, 
-            task_id,
-            config_for_uploader
+        # Загружаем ZIP в S3
+        s3_url = upload_result_to_s3(
+            zip_path=result_zip_path,
+            original_filename=original_filename,
+            task_id=task_id
         )
         
-        if s3_markdown_path and os.path.exists(s3_markdown_path):
-            logger.info(f"Created S3 markdown: {s3_markdown_path}")
-            
-            # Заменяем оригинальный файл
-            os.replace(s3_markdown_path, markdown_path)
-            
-            # Можем удалить локальные изображения после загрузки
-            # (опционально, сейчас оставляем как backup)
-            
-            return markdown_path, image_count
+        if s3_url:
+            logger.info(f"Successfully uploaded ZIP to S3: {s3_url}")
+            return s3_url, 0  # Возвращаем URL и 0 для совместимости
         else:
-            logger.warning("Failed to create S3 markdown")
-            return markdown_path, 0
+            logger.error(f"Failed to upload ZIP to S3 for task {task_id}")
+            return None, 0
             
     except Exception as e:
-        logger.error(f"Error processing S3 upload: {e}")
-        return markdown_path, 0
+        logger.error(f"Error uploading ZIP to S3: {e}")
+        return None, 0

@@ -21,16 +21,12 @@ class AnyToMdClient:
         self.base_url = base_url.rstrip('/')
         self.api_base = f"{self.base_url}/api/v1"
         
-    def convert_file(self, file_path: str, type_result: str = None) -> Dict[str, Any]:
+    def convert_file(self, file_path: str) -> Dict[str, Any]:
         """
         Submit a file for conversion.
         
         Args:
             file_path: Path to the file to convert
-            type_result: Optional. Controls what's included in the result ZIP:
-                        - "norm" (default): Only markdown file
-                        - "test": Markdown + extracted images (for verification)
-                        Note: Images are always uploaded to S3 in both modes
             
         Returns:
             Response with task_id and status
@@ -44,10 +40,7 @@ class AnyToMdClient:
         
         with open(file_path, 'rb') as f:
             files = {'file': (os.path.basename(file_path), f)}
-            data = {}
-            if type_result is not None:
-                data['type_result'] = type_result
-            response = requests.post(f"{self.api_base}/convert", files=files, data=data if data else None)
+            response = requests.post(f"{self.api_base}/convert", files=files)
         
         response.raise_for_status()
         return response.json()
@@ -77,15 +70,11 @@ class AnyToMdClient:
         Returns:
             Path to the downloaded file
         """
-        response = requests.get(f"{self.api_base}/download/{task_id}", stream=True)
+        response = requests.get(f"{self.api_base}/download/{task_id}")
         response.raise_for_status()
         
         # Get filename from headers or use default
-        filename = "result.zip"
-        if 'content-disposition' in response.headers:
-            cd = response.headers['content-disposition']
-            if 'filename=' in cd:
-                filename = cd.split('filename=')[1].strip('"')
+        filename = "s3_url.txt"
         
         if output_path:
             save_path = output_path
@@ -95,10 +84,9 @@ class AnyToMdClient:
         # Ensure directory exists
         os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
         
-        # Save file
-        with open(save_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
+        # Save S3 URL as text file
+        with open(save_path, 'w', encoding='utf-8') as f:
+            f.write(response.text)
         
         return save_path
     
@@ -107,8 +95,7 @@ class AnyToMdClient:
         file_path: str, 
         output_path: Optional[str] = None,
         poll_interval: float = 1.0,
-        timeout: float = 300.0,
-        type_result: str = None
+        timeout: float = 300.0
     ) -> str:
         """
         Convert a file and wait for completion.
@@ -118,10 +105,6 @@ class AnyToMdClient:
             output_path: Where to save result (optional)
             poll_interval: How often to check status (seconds)
             timeout: Maximum time to wait (seconds)
-            type_result: Optional. Controls what's included in the result ZIP:
-                        - "norm" (default): Only markdown file
-                        - "test": Markdown + extracted images (for verification)
-                        Note: Images are always uploaded to S3 in both modes
             
         Returns:
             Path to downloaded result
@@ -132,7 +115,7 @@ class AnyToMdClient:
         """
         # Submit file
         logger.info(f"Submitting {file_path} for conversion")
-        result = self.convert_file(file_path, type_result=type_result)
+        result = self.convert_file(file_path)
         task_id = result['task_id']
         
         # Wait for completion

@@ -36,5 +36,50 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
-/marker_models/
 /test_results/
+
+# Temporary and development files
+demo_pending_tasks.json
+test_s3_urls_to_delete.txt
+*.sh
+
+# Old test files (можно раскомментировать если хотите сохранить)
+# test_files_old/
+
+# Marker models (хранятся локально, не в репозитории)
+marker_models/
+
+# Временные файлы и документация разработки
+CHANGES_LIST.md
+CLAUDE.md
+DOCKER_*.md
+FINAL_DOCKER_SOLUTION.md
+MODEL_VERSION_MATRIX.md
+STRUCTURE.md
+corrected_docker_issue.md
+docker.env
+docker-compose-with-models.yml
+docker-compose.final.yml
+docker-compose.optimized.yml
+docker-compose.production.yml
+Dockerfile.optimized
+Dockerfile.production
+identifier.sqlite
+server.log
+test.txt
+docker_build.log
+debug-container.sh
+rebuild-docker.sh
+
+# Клиентские временные файлы
+client/pending_tasks.json
+client/test.txt
+
+# Временные скрипты
+scripts/
+test_scripts/
+docker/
+
+# Виртуальные окружения
+.venv_new/
+.serena/

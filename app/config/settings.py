@@ -27,12 +27,13 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # Единый список всех поддерживаемых форматов
 # HTML/HTM удалены - требуют специальной обработки с внешними изображениями
+# EPUB временно отключен - проблема совместимости зависимостей в Docker (будет исправлено в v2.1)
 # ZIP добавлен для поддержки сжатых документов
-SUPPORTED_FORMATS = ["doc", "docx", "epub", "odt", "pdf", "pptx", "rtf", "xls", "xlsx", "zip"]
+SUPPORTED_FORMATS = ["doc", "docx", "odt", "pdf", "pptx", "rtf", "xls", "xlsx", "zip"]
 
 # Форматы для каждого конвертера (для внутреннего использования)
 # MARKER_FORMATS - форматы, которые Marker может обработать напрямую без конвертации в PDF
-MARKER_FORMATS = ["pdf", "pptx", "xlsx", "epub"]  # Прямая обработка через Marker
+MARKER_FORMATS = ["pdf", "pptx", "xlsx"]  # Прямая обработка через Marker (epub временно удален)
 # PDF_BRIDGE_FORMATS - форматы, требующие конвертации через PDF для Marker
 PDF_BRIDGE_FORMATS = ["doc", "docx", "odt", "rtf", "xls"]  # Конвертация через LibreOffice → PDF → Marker
 
@@ -48,3 +49,12 @@ CLEANUP_DAYS = int(os.getenv("CLEANUP_DAYS", "7"))
 # LibreOffice conversion timeouts (in seconds)
 LIBREOFFICE_TIMEOUT_DEFAULT = int(os.getenv("LIBREOFFICE_TIMEOUT_DEFAULT", "180"))  # 3 минуты для обычных файлов
 LIBREOFFICE_TIMEOUT_COMPLEX = int(os.getenv("LIBREOFFICE_TIMEOUT_COMPLEX", "300"))  # 5 минут для PDF и EPUB
+
+# S3 Settings
+S3_ENABLED = os.getenv('AWS_ACCESS_KEY_ID') is not None
+AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME')
+AWS_S3_ENDPOINT_URL = os.getenv('AWS_S3_ENDPOINT_URL')
+AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
+S3_FOLDER_PREFIX = os.getenv('S3_FOLDER_PREFIX', 'documents/')

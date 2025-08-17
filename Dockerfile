@@ -28,14 +28,14 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt && \
-    # Устанавливаем CPU-only версию PyTorch перед marker-pdf
-    pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+# ВАЖНО: Сначала устанавливаем CPU-версию PyTorch, чтобы marker-pdf не тянул CUDA
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+    # Теперь устанавливаем остальные зависимости
+    pip install --no-cache-dir -r requirements.txt && \
     # Устанавливаем weasyprint для marker-pdf (нужен для EPUB, XLSX, PPTX)
     pip install --no-cache-dir weasyprint && \
     # Устанавливаем дополнительные зависимости для Marker
-    pip install --no-cache-dir python-pptx openpyxl ebooklib && \
-    pip install --no-cache-dir marker-pdf
+    pip install --no-cache-dir python-pptx openpyxl ebooklib
 
 # Copy application code
 COPY app/ ./app/
@@ -44,8 +44,12 @@ COPY app/ ./app/
 RUN mkdir -p temp/uploads temp/results logs data
 
 # Копируем предварительно скачанные модели Marker из директории проекта
-# Это позволит избежать повторного скачивания при сборке Docker
+# Точно такой же путь как в локальной системе
 COPY --chown=root:root marker_models /root/.cache/datalab/models
+
+# Минимальные переменные окружения для CPU-only режима
+ENV TORCH_DEVICE=cpu \
+    NO_CUDA=1
 
 # Expose port
 EXPOSE 8000

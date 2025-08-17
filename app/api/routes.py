@@ -1,5 +1,5 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks, Form
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse, PlainTextResponse
 from typing import Optional
 import uuid
 import os
@@ -10,6 +10,11 @@ from datetime import datetime
 import zipfile
 import tempfile
 import shutil
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
+import hashlib
+import aiofiles
+import io
 
 from app.api.schemas import (
     ConversionResponse, TaskStatusResponse, SupportedFormatsResponse,
@@ -29,137 +34,27 @@ logger = logging.getLogger(__name__)
 
 
 
-# Try to import PDF Bridge converter
-try:
-    from app.converters.pdf_bridge_converter import PdfBridgeConverter
-    pdf_bridge_converter = PdfBridgeConverter()
-    PDF_BRIDGE_AVAILABLE = True
-except ImportError:
-    pdf_bridge_converter = None
-    PDF_BRIDGE_AVAILABLE = False
-    logger.warning("PDF Bridge converter not available.")
-
-# Try to import Marker converter
-try:
-    from app.converters.marker_converter import MarkerConverter
-    marker_converter = MarkerConverter()
-    MARKER_AVAILABLE = True
-except ImportError:
-    marker_converter = None
-    MARKER_AVAILABLE = False
-    logger.warning("Marker not installed. Enhanced PDF conversion will not be available.")
+# Конвертеры теперь импортируются в QueueWorker, здесь не нужны
 
 
 router = APIRouter()
 
+# Семафор перенесен в QueueWorkerPool
 
 
 
 
+# Функция process_conversion удалена - обработка теперь в QueueWorker
 
-async def process_conversion(
-    task_id: uuid.UUID,
-    file_path: str,
-    original_filename: str,
-    type_result: str = "norm"
-):
-    """Background task for document conversion."""
-    try:
-        # Update status
-        await task_db.update_task_status(
-            str(task_id), 
-            StatusEnum.PROCESSING, 
-            "Converting document..."
-        )
-        
-        # Determine converter based on file format
-        file_ext = get_file_extension(original_filename)
-        
-        # Логика выбора конвертера:
-        # 1. Marker для форматов, которые он поддерживает напрямую
-        # 2. PDF Bridge для форматов, требующих конвертации через PDF
-        if file_ext in MARKER_FORMATS and MARKER_AVAILABLE:
-            converter = marker_converter
-            logger.info(f"Using MarkerConverter for {file_ext} (direct conversion)")
-        elif file_ext in PDF_BRIDGE_FORMATS and PDF_BRIDGE_AVAILABLE:
-            converter = pdf_bridge_converter
-            logger.info(f"Using PdfBridgeConverter for {file_ext} (LibreOffice → PDF → Marker)")
-        else:
-            if not MARKER_AVAILABLE:
-                raise ValueError("Marker is not installed. Please install marker-pdf.")
-            raise ValueError(f"Unsupported format: {file_ext}")
-        
-        # Create output directory
-        output_dir = os.path.join(RESULTS_DIR, str(task_id))
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Convert document
-        logger.info(f"Converting {original_filename} with {converter.__class__.__name__}, type_result={type_result}")
-        markdown_path, images_dir = await converter.convert(file_path, output_dir)
-        
-        # Обработка с S3 если включено
-        logger.info(f"До S3 обработки: markdown_path={markdown_path}, images_dir={images_dir}")
-        from app.services.s3_post_processor import process_result_with_s3
-        original_markdown_path = markdown_path
-        markdown_path, s3_images_count = process_result_with_s3(
-            str(task_id),
-            markdown_path,
-            images_dir
-        )
-        logger.info(f"После S3 обработки: s3_images_count={s3_images_count}, markdown_path={markdown_path}")
-        
-        # Update status
-        await task_db.update_task_status(
-            str(task_id),
-            StatusEnum.PROCESSING,
-            "Creating archive..."
-        )
-        
-        # Create ZIP archive
-        file_ext = get_file_extension(original_filename).replace('.', '')
-        zip_filename = f"{Path(original_filename).stem}_{file_ext}_converted.zip"
-        zip_path = os.path.join(output_dir, zip_filename)
-        
-        # В режиме test включаем изображения в архив
-        if type_result == "test":
-            create_result_zip(markdown_path, images_dir, zip_path)
-        else:
-            # В режиме norm только markdown
-            create_result_zip(markdown_path, None, zip_path)
-        
-        # Update task as completed
-        await task_db.update_task_status(
-            str(task_id),
-            StatusEnum.COMPLETED,
-            'Conversion completed successfully'
-        )
-        await task_db.update_task_result(
-            str(task_id),
-            zip_path,
-            100
-        )
-        
-        logger.info(f"Task {task_id} completed successfully")
-        
-    except Exception as e:
-        logger.error(f"Error processing task {task_id}: {e}")
-        await task_db.update_task_status(
-            str(task_id),
-            StatusEnum.FAILED,
-            f'Error: {str(e)}'
-        )
-        await task_db.update_task_result(
-            str(task_id),
-            "",
-            0
-        )
+
+async def calculate_file_hash(file_content: bytes) -> str:
+    """Вычислить SHA256 hash файла."""
+    return hashlib.sha256(file_content).hexdigest()
 
 
 @router.post("/convert", response_model=ConversionResponse)
 async def convert_document(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    type_result: str = Form("norm")
+    file: UploadFile = File(...)
 ):
     """
     Upload a document for conversion to Markdown.
@@ -168,136 +63,156 @@ async def convert_document(
     
     Parameters:
     - file: Document file to convert
-    - type_result: "norm" (only markdown) or "test" (markdown + images for verification)
     """
     try:
-        # Validate format
+        # ✅ Быстрая валидация ДО загрузки
         if not is_format_supported(file.filename, SUPPORTED_FORMATS):
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported format. Supported: {', '.join(SUPPORTED_FORMATS)}"
             )
         
-        # Check file size
-        file.file.seek(0, 2)
-        file_size = file.file.tell()
-        file.file.seek(0)
-        
-        if file_size > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File too large. Maximum size: {MAX_FILE_SIZE / 1024 / 1024} MB"
-            )
-        
-        # Обработка ZIP файлов
-        original_filename = file.filename
-        file_content = await file.read()
-        
-        if get_file_extension(file.filename) == 'zip':
-            # Создаем временную директорию для распаковки
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Сохраняем ZIP
-                zip_path = os.path.join(temp_dir, "archive.zip")
-                with open(zip_path, "wb") as f:
-                    f.write(file_content)
-                
-                # Распаковываем
-                try:
-                    with zipfile.ZipFile(zip_path, 'r') as zf:
-                        zf.extractall(temp_dir)
-                except zipfile.BadZipFile:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Поврежденный ZIP архив"
-                    )
-                
-                # Ищем документ в корне архива
-                document_found = None
-                unsupported_files = []
-                
-                for item in os.listdir(temp_dir):
-                    if item == "archive.zip":
-                        continue
-                    item_path = os.path.join(temp_dir, item)
-                    if os.path.isfile(item_path):
-                        ext = get_file_extension(item)
-                        # Проверяем только документы (без zip)
-                        if ext in [fmt for fmt in SUPPORTED_FORMATS if fmt != 'zip']:
-                            if document_found:
-                                raise HTTPException(
-                                    status_code=400,
-                                    detail=f"В ZIP архиве найдено несколько документов: {document_found} и {item}. Поддерживается только ОДИН документ."
-                                )
-                            document_found = item
-                            document_path = item_path
-                        else:
-                            unsupported_files.append(item)
-                
-                if not document_found:
-                    if unsupported_files:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"В ZIP архиве найден файл с неподдерживаемым форматом: {unsupported_files[0]}. Поддерживаемые форматы: {', '.join([fmt for fmt in SUPPORTED_FORMATS if fmt != 'zip'])}"
-                        )
-                    else:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="ZIP архив пустой или содержит только папки"
-                        )
-                
-                # Читаем содержимое найденного документа
-                with open(document_path, "rb") as f:
-                    file_content = f.read()
-                
-                # Обновляем имя файла для дальнейшей обработки
-                original_filename = document_found
-                logger.info(f"Extracted document from ZIP: {document_found}")
-        
-        # Generate task ID
+        # ✅ Генерируем ID и создаем папку сразу
         task_id = uuid.uuid4()
-        
-        # Create task directory
         task_dir = os.path.join(UPLOAD_DIR, str(task_id))
         os.makedirs(task_dir, exist_ok=True)
         
-        # Save uploaded file
-        # Безопасная обработка имени файла для защиты от path traversal
-        safe_filename = sanitize_filename(original_filename)
+        safe_filename = sanitize_filename(file.filename)
         file_path = os.path.join(task_dir, safe_filename)
-        with open(file_path, "wb") as f:
-            f.write(file_content)
         
-        # Create task in database
+        # ✅ НАСТОЯЩИЙ стриминг - сохраняем сразу на диск
+        total_size = 0
+        hash_obj = hashlib.sha256()
+        
+        async with aiofiles.open(file_path, 'wb') as f:
+            while chunk := await file.read(8192):  # 8KB chunks
+                chunk_size = len(chunk)
+                total_size += chunk_size
+                
+                # Проверяем размер на лету
+                if total_size > MAX_FILE_SIZE:
+                    await f.close()
+                    os.remove(file_path)  # Удаляем частично загруженный файл
+                    shutil.rmtree(task_dir, ignore_errors=True)
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"File too large. Max: {MAX_FILE_SIZE / 1024 / 1024} MB"
+                    )
+                
+                # Считаем hash на лету
+                hash_obj.update(chunk)
+                
+                # Сохраняем chunk
+                await f.write(chunk)
+        
+        file_hash = hash_obj.hexdigest()
+        logger.info(f"Uploaded {total_size / 1024 / 1024:.1f}MB, hash: {file_hash[:8]}...")
+        
+        # ✅ Проверяем кеш
+        cached_task = await task_db.get_task_by_hash(file_hash)
+        if cached_task and cached_task.get('result_path'):
+            if os.path.exists(cached_task['result_path']):
+                logger.info(f"Cache hit for {file_hash[:8]}")
+                # Удаляем только что загруженный файл (он дубликат)
+                os.remove(file_path)
+                shutil.rmtree(task_dir, ignore_errors=True)
+                return ConversionResponse(
+                    task_id=uuid.UUID(cached_task['id']),
+                    status=StatusEnum.COMPLETED,
+                    message='Using cached result'
+                )
+        
+        original_filename = file.filename
+        
+        # ✅ Обработка ZIP БЕЗ перезагрузки
+        if get_file_extension(file.filename) == 'zip':
+            try:
+                with zipfile.ZipFile(file_path, 'r') as zf:
+                    # Ищем документы
+                    docs = [n for n in zf.namelist() 
+                           if get_file_extension(n) in [fmt for fmt in SUPPORTED_FORMATS if fmt != 'zip']
+                           and not n.startswith('__MACOSX/')
+                           and '/' not in n]  # только в корне архива
+                    
+                    if len(docs) == 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="ZIP архив пустой или не содержит поддерживаемых документов в корне"
+                        )
+                    elif len(docs) > 1:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"В ZIP архиве найдено {len(docs)} документов. Поддерживается только ОДИН документ."
+                        )
+                    
+                    # Извлекаем документ
+                    doc_content = zf.read(docs[0])
+                    original_filename = os.path.basename(docs[0])
+                    
+                    # Пересчитываем hash для извлеченного документа
+                    file_hash = hashlib.sha256(doc_content).hexdigest()
+                    
+                    # Проверяем кеш для извлеченного документа
+                    cached_task = await task_db.get_task_by_hash(file_hash)
+                    if cached_task and cached_task.get('result_path'):
+                        if os.path.exists(cached_task['result_path']):
+                            logger.info(f"Cache hit for extracted doc {file_hash[:8]}")
+                            os.remove(file_path)
+                            shutil.rmtree(task_dir, ignore_errors=True)
+                            return ConversionResponse(
+                                task_id=uuid.UUID(cached_task['id']),
+                                status=StatusEnum.COMPLETED,
+                                message='Using cached result'
+                            )
+                    
+                    # Сохраняем извлеченный документ
+                    new_file_path = os.path.join(task_dir, sanitize_filename(original_filename))
+                    async with aiofiles.open(new_file_path, 'wb') as f:
+                        await f.write(doc_content)
+                    
+                    # Удаляем ZIP, оставляем только документ
+                    os.remove(file_path)
+                    file_path = new_file_path
+                    
+                    logger.info(f"Extracted from ZIP: {original_filename}")
+                    
+            except zipfile.BadZipFile:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Поврежденный ZIP архив"
+                )
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Ошибка обработки ZIP: {str(e)}"
+                )
+        
+        # ✅ Создаем задачу
         await task_db.create_task(
             str(task_id),
             {
                 'original_filename': original_filename,
-                'status': StatusEnum.PENDING,
-                'message': 'Task queued for processing',
+                'status': StatusEnum.QUEUED,
+                'message': 'Файл загружен и добавлен в очередь на обработку',
                 'progress': 0,
-                'type_result': type_result
+                'file_hash': file_hash
             }
         )
         
-        # Add background task
-        background_tasks.add_task(
-            process_conversion,
-            task_id,
-            file_path,
-            original_filename,
-            type_result
-        )
+        # Конвертация будет выполнена QueueWorker автоматически
         
         return ConversionResponse(
             task_id=task_id,
-            status=StatusEnum.PENDING,
-            message='Task queued for processing'
+            status=StatusEnum.QUEUED,
+            message='Файл загружен и добавлен в очередь на обработку'
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating task: {e}")
+        logger.error(f"Upload error: {e}")
         raise HTTPException(
             status_code=500, 
             detail=f"Internal server error: {str(e)}"
@@ -323,8 +238,7 @@ async def get_task_status(task_id: uuid.UUID):
         progress=task.get('progress', 0),
         message=task['message'],
         created_at=str(datetime.fromtimestamp(task['created_at'])),
-        s3_enabled=is_s3_enabled(),
-        type_result=task.get('type_result', 'norm')
+        s3_enabled=is_s3_enabled()
     )
     
     # Add download URL if completed
@@ -371,6 +285,17 @@ async def download_result(task_id: uuid.UUID, background_tasks: BackgroundTasks)
             detail="Task not completed yet"
         )
     
+    # Проверяем, есть ли S3 URL
+    s3_url = task.get('s3_url')
+    
+    if s3_url:
+        # Если есть S3 URL, возвращаем его как plain text
+        logger.info(f"Returning S3 URL for task {task_id}: {s3_url}")
+        # Schedule cleanup
+        background_tasks.add_task(cleanup_after_download, str(task_id))
+        return PlainTextResponse(content=s3_url)
+    
+    # Иначе возвращаем локальный файл
     result_path = task.get('result_path')
     if not result_path or not os.path.exists(result_path):
         raise HTTPException(
@@ -423,6 +348,23 @@ async def get_pending_tasks():
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving tasks: {str(e)}"
+        )
+
+
+@router.get("/queue/stats")
+async def get_queue_statistics():
+    """Get queue statistics."""
+    try:
+        stats = await task_db.get_queue_statistics()
+        return {
+            "status": "success",
+            "statistics": stats
+        }
+    except Exception as e:
+        logger.error(f"Error getting queue statistics: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving queue statistics: {str(e)}"
         )
 
 

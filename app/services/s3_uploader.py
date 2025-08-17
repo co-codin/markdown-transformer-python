@@ -6,6 +6,8 @@ import os
 import hashlib
 import mimetypes
 import logging
+import zipfile
+import tempfile
 from typing import Optional, Dict
 from dotenv import load_dotenv
 
@@ -127,33 +129,6 @@ def upload_to_s3(
         return None
 
 
-def generate_s3_key(file_path: str, prefix: str = "", add_hash: bool = True) -> str:
-    """
-    Генерирует уникальный S3 ключ для файла.
-    
-    Args:
-        file_path: Путь к файлу
-        prefix: Префикс для ключа (например, "markdown-images/task-123")
-        add_hash: Добавить хеш к имени файла для уникальности
-        
-    Returns:
-        S3 ключ
-    """
-    filename = os.path.basename(file_path)
-    
-    if add_hash:
-        # Читаем файл для хеша
-        with open(file_path, 'rb') as f:
-            file_hash = hashlib.md5(f.read()).hexdigest()[:8]
-        
-        name, ext = os.path.splitext(filename)
-        filename = f"{name}_{file_hash}{ext}"
-    
-    if prefix:
-        return f"{prefix.rstrip('/')}/{filename}"
-    else:
-        return filename
-
 
 def check_s3_file_exists(s3_key: str, bucket_name: Optional[str] = None) -> bool:
     """
@@ -204,3 +179,119 @@ def get_s3_url(s3_key: str, bucket_name: Optional[str] = None) -> str:
         return f"{endpoint_url.rstrip('/')}/{bucket_name}/{s3_key}"
     else:
         return f"https://{bucket_name}.s3.{region}.amazonaws.com/{s3_key}"
+
+
+def create_images_zip(images_dir: str, output_path: Optional[str] = None) -> Optional[str]:
+    """
+    Создает ZIP архив из папки с изображениями.
+    
+    Args:
+        images_dir: Путь к папке с изображениями
+        output_path: Путь для сохранения ZIP (если None - временный файл)
+        
+    Returns:
+        Путь к созданному ZIP файлу или None при ошибке
+    """
+    if not os.path.exists(images_dir):
+        logger.error(f"Папка с изображениями не найдена: {images_dir}")
+        return None
+        
+    try:
+        # Создаем временный файл если путь не указан
+        if output_path is None:
+            temp_file = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
+            output_path = temp_file.name
+            temp_file.close()
+            
+        # Создаем ZIP архив
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Добавляем все файлы из папки
+            for root, dirs, files in os.walk(images_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Сохраняем относительный путь в архиве
+                    arcname = os.path.relpath(file_path, images_dir)
+                    zf.write(file_path, arcname)
+                    
+        logger.info(f"Создан ZIP архив изображений: {output_path}")
+        return output_path
+        
+    except Exception as e:
+        logger.error(f"Ошибка создания ZIP архива: {e}")
+        if output_path and os.path.exists(output_path):
+            os.remove(output_path)
+        return None
+
+
+def upload_zip_to_s3(
+    zip_path: str,
+    s3_key: str,
+    bucket_name: Optional[str] = None,
+    make_public: bool = True
+) -> Optional[str]:
+    """
+    Загружает ZIP архив в S3.
+    
+    Args:
+        zip_path: Путь к ZIP файлу
+        s3_key: Ключ (путь) в S3 bucket
+        bucket_name: Имя bucket (если None - из окружения)
+        make_public: Сделать файл публично доступным
+        
+    Returns:
+        URL загруженного файла или None при ошибке
+    """
+    # Используем базовую функцию upload_to_s3
+    return upload_to_s3(zip_path, s3_key, bucket_name, make_public)
+
+
+def upload_result_to_s3(
+    zip_path: str,
+    original_filename: str,
+    task_id: str,
+    bucket_name: Optional[str] = None
+) -> Optional[str]:
+    """
+    Загружает готовый ZIP архив в S3.
+    
+    Args:
+        zip_path: Путь к готовому ZIP файлу
+        original_filename: Оригинальное имя файла для правильного именования
+        task_id: ID задачи
+        bucket_name: Имя bucket (если None - из окружения)
+        
+    Returns:
+        S3 URL загруженного файла или None при ошибке
+    """
+    if not HAS_BOTO3:
+        logger.error("boto3 не установлен")
+        return None
+        
+    if not os.path.exists(zip_path):
+        logger.error(f"ZIP файл не найден: {zip_path}")
+        return None
+        
+    try:
+        # Формируем имя файла в S3 на основе оригинального имени
+        # Берем имя ZIP файла как есть (уже содержит правильный формат)
+        zip_filename = os.path.basename(zip_path)
+        s3_key = f"markdown-results/{task_id}/{zip_filename}"
+        
+        # Загружаем ZIP в S3
+        s3_url = upload_to_s3(
+            zip_path,
+            s3_key,
+            bucket_name,
+            make_public=True
+        )
+        
+        if s3_url:
+            logger.info(f"ZIP загружен в S3: {s3_url}")
+        else:
+            logger.error(f"Не удалось загрузить ZIP в S3")
+            
+        return s3_url
+        
+    except Exception as e:
+        logger.error(f"Ошибка загрузки в S3: {e}")
+        return None

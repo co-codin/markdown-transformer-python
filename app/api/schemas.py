@@ -7,6 +7,7 @@ from datetime import datetime
 
 class StatusEnum(str, Enum):
     PENDING = "pending"
+    QUEUED = "queued"  # Задача в очереди на обработку
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -31,7 +32,6 @@ class TaskStatusResponse(BaseModel):
     created_at: Optional[str] = None
     s3_enabled: Optional[bool] = None
     s3_images_count: Optional[int] = None
-    type_result: Optional[str] = None
     
 
 class SupportedFormatsResponse(BaseModel):

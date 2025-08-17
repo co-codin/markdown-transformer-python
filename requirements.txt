@@ -1,13 +1,24 @@
+# Основные зависимости сервера
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 aiosqlite==0.20.0
+aiofiles==24.1.0
 python-dotenv==1.0.1
 pydantic==2.10.4
 pydantic-settings==2.7.0
 
-# S3 support (optional)
+# S3 поддержка (опционально)
+# Установите, если планируете использовать S3 для хранения результатов
 boto3==1.35.95
+botocore==1.35.95
 
-# Marker will be installed separately:
-# pip install marker-pdf
+# Конвертер документов (обязательно)
+# Установка marker-pdf[full] автоматически загрузит модели (~2.4GB) при первом запуске
+# Фиксируем версию для совместимости с моделями от 2025_08_08
+marker-pdf[full]==1.8.2
+
+# Примечание: Для работы с некоторыми форматами требуется LibreOffice:
+# Ubuntu/Debian: sudo apt-get install libreoffice
+# macOS: brew install libreoffice
+# Windows: скачайте с https://www.libreoffice.org/

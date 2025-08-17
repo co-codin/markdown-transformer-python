@@ -17,6 +17,22 @@ services:
       - CLEANUP_INTERVAL_HOURS=24
       - CLEANUP_AGE_DAYS=7
       
+      # Marker/PyTorch Configuration для исправления зависших процессов
+      - TORCH_DEVICE=cpu
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+      - HF_HOME=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+      - HF_DATASETS_CACHE=/root/.cache/huggingface/datasets
+      - HF_HUB_CACHE=/root/.cache/huggingface/hub
+      - HF_HUB_DISABLE_PROGRESS_BARS=1
+      - HF_HUB_OFFLINE=1
+      - MARKER_CACHE_DIR=/root/.cache/marker
+      - MODEL_BASE_DIR=/root/.cache/marker/models
+      - CUDA_VISIBLE_DEVICES=""
+      - NVIDIA_VISIBLE_DEVICES=""
+      - TOKENIZERS_PARALLELISM=false
+      - OMP_NUM_THREADS=4
+      
       # S3 настройки (опционально)
       # Передаем переменные из .env файла
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}

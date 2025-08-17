@@ -20,10 +20,27 @@ if __name__ == "__main__":
     logging.info(f"Server will be available at: http://{HOST}:{PORT}")
     logging.info(f"API documentation: http://{HOST}:{PORT}/docs")
     
-    uvicorn.run(
-        "app:app", 
-        host=HOST, 
-        port=PORT, 
-        reload=DEBUG,
-        log_level="info"
-    )
+    # Используем один процесс с асинхронной обработкой
+    # FastAPI и так обрабатывает запросы параллельно благодаря asyncio
+    if DEBUG:
+        # В DEBUG режиме используем строку для поддержки reload
+        uvicorn.run(
+            "app:app",  # Строка импорта для reload
+            host=HOST, 
+            port=PORT, 
+            reload=True,  # Включаем reload в DEBUG
+            log_level="info",
+            loop="asyncio",  # Явно указываем event loop
+            access_log=True  # Включаем логи запросов для отладки
+        )
+    else:
+        # В production используем прямую ссылку без reload
+        uvicorn.run(
+            app,  # Прямая ссылка на app
+            host=HOST, 
+            port=PORT, 
+            reload=False,  # Выключаем reload
+            log_level="info",
+            loop="asyncio",  # Явно указываем event loop
+            access_log=True  # Включаем логи запросов для отладки
+        )
