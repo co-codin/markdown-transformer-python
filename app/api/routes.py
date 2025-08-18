@@ -15,6 +15,7 @@ import asyncio
 import hashlib
 import aiofiles
 import io
+from fastapi.responses import JSONResponse
 
 from app.api.schemas import (
     ConversionResponse, TaskStatusResponse, SupportedFormatsResponse,
@@ -293,7 +294,7 @@ async def download_result(task_id: uuid.UUID, background_tasks: BackgroundTasks)
         logger.info(f"Returning S3 URL for task {task_id}: {s3_url}")
         # Schedule cleanup
         background_tasks.add_task(cleanup_after_download, str(task_id))
-        return PlainTextResponse(content=s3_url)
+        return JSONResponse(content={"s3_url": s3_url}, status_code=200)
     
     # Иначе возвращаем локальный файл
     result_path = task.get('result_path')
